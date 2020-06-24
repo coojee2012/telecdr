@@ -1,0 +1,22 @@
+{
+  "bindHost": "0.0.0.0",
+  "bindPort": 8080,
+  "exchanges": [
+    {
+      "pbxType": "jx10680",
+      "exchangeNum": "680",
+      "ipAddr": "192.224.1.129"
+    },
+    {
+      "pbxType": "jx10576",
+      "exchangeNum": "576",
+      "ipAddr": "192.224.2.129"
+    },
+    {
+      "pbxType": "gl04",
+      "exchangeNum": "500",
+      "ipAddr": "192.224.2.129"
+    }
+  ],
+  "fsAPI": "http://localhost:8181/webapi"
+}
