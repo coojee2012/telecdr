@@ -127,19 +127,21 @@ const sendGL04Cmd = async (host, cmd, exchange, login = false) => {
     const params = Object.assign({}, telnetGL04Options, { host });
     await connection.connect(params);
     logger.debug("connection connected");
-    await connection.send("\r\n"); // 发送一个回车开始
+    const welcome = await connection.send("\r\n"); // 发送一个回车开始
+    //console.log(welcome);
     if (login) {
-      const login = await connection.send("a\r\n");
-      logger.debug("connection login return:", login);
-      const password = await connection.send("a\r\n");
-      logger.debug("connection password return:", password);
+      const login = await connection.send("a\n");
+      //console.log("connection login return:", login);
+      const password = await connection.send("a\n");
+      //console.log("connection password return:", password);
     }
-    await connection.send(`cd ${exchange}\r\n`);
-
+    const cdexchange = await connection.send(`cd ${exchange}\n`);
+    //console.log("cdexchange return:",cdexchange);
     bufferHelper = [];
-    await connection.send(`${cmd}\r\n`);
+    const cmdReturn = await connection.send(`${cmd}\n`);
+    //console.log("cmdReturn return:",cmdReturn);
     const resStr = iconv.decode(Buffer.concat(bufferHelper), "GBK");
-    console.log("cmd return:", resStr);
+    //console.log("cmd return:", resStr);
     logger.info("cmd return:", resStr);
     await connection.end();
     await connection.destroy();
@@ -204,13 +206,13 @@ app.all("/stopen/:exchange/:sdn/:das", async (req, res) => {
     });
     if (
       ["jx10576", "jx10680"].indexOf(exc.pbxType) > -1 &&
-      [("1", "11", "12", "13", "41")].indexOf(das) < 0
+      ["1", "11", "12", "13", "41"].indexOf(das) < 0
     ) {
       res.send({ success: false, message: "群号错误" });
       return;
     } else if (
-      ["jx10576", "jx10680"].indexOf(exc.pbxType) > -1 &&
-      [("1", "11", "12", "13", "41")].indexOf(das) < 0
+      ["gl04500"].indexOf(exc.pbxType) > -1 &&
+      ["1", "11", "12", "13", "41"].indexOf(das) < 0
     ) {
       res.send({ success: false, message: "群号错误" });
       return;
