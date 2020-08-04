@@ -45,6 +45,21 @@ const telnetJx10Options = {
   debug: false,
 };
 
+const telnetGL04Options = {
+  host: "192.224.2.1",
+  port: 7005,
+  negotiationMandatory: false,
+  shellPrompt: "/ROOT/", // or negotiationMandatory: false
+  timeout: 1500,
+  loginPrompt: "/UserName:/i",
+  passwordPrompt: "/PassWord:/i",
+  username: "root", //default root
+  password: "guest", // default guest
+  execTimeout: 1000 * 2, //default 2000 ms
+  sendTimeout: 1000 * 2,
+  debug: false,
+};
+
 const sendJx10Cmd = async (host, cmd, login = false) => {
   const connection = new Telnet();
   let connected = false;
@@ -79,6 +94,56 @@ const sendJx10Cmd = async (host, cmd, login = false) => {
     await connection.end();
     await connection.destroy();
     if (/修改用户属性成功/.test(resStr)) {
+      return { success: true, result: resStr };
+    } else {
+      return { success: false, result: resStr };
+    }
+  } catch (error) {
+    // handle the throw (timeout)
+    console.error("error:", error);
+    if (connected) {
+      await connection.end();
+      await connection.destroy();
+    }
+    return { success: false, message: `指令执行错误：${error.message}` };
+  }
+};
+const sendGL04Cmd = async (host, cmd, exchange, login = false) => {
+  const connection = new Telnet();
+  let connected = false;
+  let bufferHelper = [];
+  connection.on("connect", () => {
+    connected = true;
+  });
+  connection.on("data", (buff) => {
+    bufferHelper.push(buff);
+  });
+  connection.on("end", () => {
+    console.log(
+      "Emitted when the other end of the socket (remote host) sends a FIN packet."
+    );
+  });
+  try {
+    const params = Object.assign({}, telnetGL04Options, { host });
+    await connection.connect(params);
+    logger.debug("connection connected");
+    await connection.send("\r\n"); // 发送一个回车开始
+    if (login) {
+      const login = await connection.send("a\r\n");
+      logger.debug("connection login return:", login);
+      const password = await connection.send("a\r\n");
+      logger.debug("connection password return:", password);
+    }
+    await connection.send(`cd ${exchange}\r\n`);
+
+    bufferHelper = [];
+    await connection.send(`${cmd}\r\n`);
+    const resStr = iconv.decode(Buffer.concat(bufferHelper), "GBK");
+    console.log("cmd return:", resStr);
+    logger.info("cmd return:", resStr);
+    await connection.end();
+    await connection.destroy();
+    if (/修改用户群号成功/.test(resStr)) {
       return { success: true, result: resStr };
     } else {
       return { success: false, result: resStr };
@@ -137,7 +202,16 @@ app.all("/stopen/:exchange/:sdn/:das", async (req, res) => {
     const exc = exchanges.find((v) => {
       return v.exchangeNum === exchange;
     });
-    if (["1", "11", "12", "13"].indexOf(das) < 0) {
+    if (
+      ["jx10576", "jx10680"].indexOf(exc.pbxType) > -1 &&
+      [("1", "11", "12", "13", "41")].indexOf(das) < 0
+    ) {
+      res.send({ success: false, message: "群号错误" });
+      return;
+    } else if (
+      ["jx10576", "jx10680"].indexOf(exc.pbxType) > -1 &&
+      [("1", "11", "12", "13", "41")].indexOf(das) < 0
+    ) {
       res.send({ success: false, message: "群号错误" });
       return;
     }
@@ -150,10 +224,19 @@ app.all("/stopen/:exchange/:sdn/:das", async (req, res) => {
       } else if (exc.pbxType === "jx10680") {
         const result = await sendJx10Cmd(exc.ipAddr, cmd, true);
         res.status(200).send(result);
+      } else if (exc.pbxType === "gl04500") {
+        const result = await sendGL04Cmd(
+          exc.ipAddr,
+          `0c0c ${sdn} ${das}`,
+          500,
+          true
+        );
+        res.status(200).send(result);
       } else {
-        res
-          .status(200)
-          .send({ success: false, message: "暂时不支持该类型交换机指令" });
+        res.status(200).send({
+          success: false,
+          message: "暂时不支持该类型交换机指令",
+        });
       }
     } else {
       res.status(200).send({ success: false, message: "没有找到交换局" });
@@ -171,7 +254,6 @@ app.all("/notice/:phone/:ntype", async (req, res) => {
         `{ignore_early_media=true}sofia/gateway/mx8/${phone} ${ntype}`
       );
       const url = `${fsAPI}/originate?${paramstr}`;
-
       const response = await axios.get(url, {
         auth: {
           username: "f7811",
