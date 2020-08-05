@@ -28,7 +28,9 @@ const logger = log4js.getLogger("app");
 
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-
+let retryYear = 0;
+let retryMonth = 0;
+let intervalNum = 0;
 // these parameters are just examples and most probably won't work for your use-case.
 const telnetJx10Options = {
   host: "192.224.2.1",
@@ -274,6 +276,60 @@ app.all("/notice/:phone/:ntype", async (req, res) => {
     res.status(200).send({ success: false, message: "请求参数错误" });
   }
 });
+
+app.all("/retrycdr/:year/:month", async (req, res) => {
+  const { year, month } = req.params;
+  if (year && month) {
+    try {
+      retryYear = year;
+      retryMonth = month;
+      res.status(200).send({ success: true });
+    } catch (error) {
+      logger.error("Something went wrong:", error.message);
+      res.status(200).send({ success: false, message: error.message });
+    }
+  } else {
+    res.status(200).send({ success: false, message: "请求参数错误" });
+  }
+});
+
+app.all("/cdrconfig/:interval", async (req, res) => {
+  let { interval } = req.params;
+  if (interval) {
+    try {
+      interval = Number(interval);
+      intervalNum = interval >= 5 ? interval : 0;
+      res.status(200).send({ success: true });
+    } catch (error) {
+      logger.error("Something went wrong:", error.message);
+      res.status(200).send({ success: false, message: error.message });
+    }
+  } else {
+    res.status(200).send({ success: false, message: "请求参数错误" });
+  }
+});
+
+app.all("/getcdrconf", async (req, res) => {
+  try {
+    const sendData = Object.assign(
+      {},
+      {
+        code: 200,
+        year: retryYear,
+        month: retryMonth,
+        interval: intervalNum,
+      }
+    );
+    retryYear = 0;
+    retryMonth = 0;
+    intervalNum = 0;
+    res.status(200).send(sendData);
+  } catch (error) {
+    logger.error("Something went wrong:", error.message);
+    res.status(200).send({ code: 500, success: false, message: error.message });
+  }
+});
+
 app.use((req, res, next) => {
   const err = new Error("Not Found");
   err.status = 404;

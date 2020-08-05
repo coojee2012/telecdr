@@ -14,8 +14,8 @@
     {
       "pbxType": "gl04500",
       "exchangeNum": "500",
-      "ipAddr": "192.224.2.129"
+      "ipAddr": "223.123.0.232"
     }
   ],
-  "fsAPI": "http://localhost:8181/webapi"
+  "fsAPI": "http://192.124.0.205:8181/webapi"
 }
