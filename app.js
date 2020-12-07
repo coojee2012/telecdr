@@ -27,9 +27,12 @@ const logger = log4js.getLogger("app");
 // app.use(log4js.connectLogger(log4js.getLogger("app"), { level: "auto" }));
 
 app.use(bodyParser.urlencoded({ extended: false }));
-app.use(bodyParser.json());
+app.use(bodyParser.json({limit:'100mb'}));
+app.use(bodyParser.urlencoded({ limit:'100mb', extended: true }));
 let retryYear = 0;
 let retryMonth = 0;
+let retryDay = 0;
+let retryDays = 0;
 let intervalNum = 0;
 // these parameters are just examples and most probably won't work for your use-case.
 const telnetJx10Options = {
@@ -96,6 +99,71 @@ const sendJx10Cmd = async (host, cmd, login = false) => {
     await connection.end();
     await connection.destroy();
     if (/修改用户属性成功/.test(resStr)) {
+      return { success: true, result: resStr };
+    } else {
+      return { success: false, result: resStr };
+    }
+  } catch (error) {
+    // handle the throw (timeout)
+    console.error("error:", error);
+    if (connected) {
+      await connection.end();
+      await connection.destroy();
+    }
+    return { success: false, message: `指令执行错误：${error.message}` };
+  }
+};
+const sendJx10Auth = async (host,sdn, das,group,login = false) => {
+  const connection = new Telnet();
+  let connected = false;
+  let bufferHelper = [];
+  connection.on("connect", () => {
+    connected = true;
+  });
+  connection.on("data", (buff) => {
+    bufferHelper.push(buff);
+  });
+  connection.on("end", () => {
+    console.log(
+      "Emitted when the other end of the socket (remote host) sends a FIN packet."
+    );
+  });
+  try {
+    const params = Object.assign({}, telnetJx10Options, { host });
+    await connection.connect(params);
+    logger.debug("connection connected");
+    await connection.send("\r\n"); // 发送一个回车开始
+    if (login) {
+      const login = await connection.send("J1\r\n");
+      logger.debug("connection login return:", login);
+      const password = await connection.send("J1COD\r\n");
+      logger.debug("connection password return:", password);
+    }
+    
+    let cmd = '';
+    // 判断是否曾经添加过
+    bufferHelper = [];
+    cmd  = `SHW CSATTR:GROUP=${group}:SDN=${sdn}:`;
+    await connection.send(`${cmd}\r\n`);
+    let resStr = iconv.decode(Buffer.concat(bufferHelper), "GBK");
+    console.log(`cmd ${cmd} return: ${resStr}`);
+    logger.info(`cmd ${cmd} return: ${resStr}`);
+
+   
+    if (/用户不存在/.test(resStr)) {
+      cmd=`ADD CS SUB:GROUP=${group}:GRPNAME=0:SDN=${sdn}:NAME=0:ADDRESS=0:PHONE=0:TPDAS=${das}:DDI=0:TPLMTSET=0:MATCHOP=0:SAVEOP=0:REGETSUB=0:OWEFEE=0:ISLMTGRP=0:`;
+    } else {
+      cmd=`MOD CS SUB:GROUP=${group}:SDN=${sdn}:NAME=0:ADDRESS=0:PHONE=0:TPDAS=${das}:DDI=-1:TPLMTSET=-1:MATCHOP=-1:SAVEOP=-1:REGETSUB=-1:OWEFEE=-1:ISLMTGRP=-1:`;
+    }
+    bufferHelper = [];
+    resStr = '';
+    await connection.send(`${cmd}\r\n`);
+    resStr = iconv.decode(Buffer.concat(bufferHelper), "GBK");
+    console.log(`cmd ${cmd} return: ${resStr}`);
+    logger.info(`cmd ${cmd} return: ${resStr}`);
+    await connection.end();
+    await connection.destroy();
+    if (/鉴权用户成功/.test(resStr)) {
       return { success: true, result: resStr };
     } else {
       return { success: false, result: resStr };
@@ -195,12 +263,23 @@ app.get("/health", async (req, res) => {
 // 测试用
 app.post("/post", async (req, res) => {
   //console.log(JSON.stringify(req.body));
+  const OUT_BUREAU = [];
+  req.body.forEach((element) => {
+    OUT_BUREAU.push(element.OUT_BUREAU);
+  });
+  console.log(OUT_BUREAU + "\r\n");
   var result = { code: 200, message: "post请求成功" };
   res.send(result);
 });
-
-app.all("/stopen/:exchange/:sdn/:das", async (req, res) => {
-  const { exchange, sdn, das } = req.params;
+/**
+ * exchange:  交换局
+ * sdn: 电话号码
+ * das: 群号
+ * islocal: 是否本地 （0控制下挂交换机，1控制本交换机）
+ * group: 群组（大部分是3，默认采用-1即可）
+ */
+app.all("/stopen/:exchange/:sdn/:das/:islocal/:group", async (req, res) => {
+  const { exchange, sdn, das,islocal,group } = req.params;
   console.log("stopen request params:", { exchange, sdn, das });
   if (exchange && sdn && das) {
     const exc = exchanges.find((v) => {
@@ -223,7 +302,12 @@ app.all("/stopen/:exchange/:sdn/:das", async (req, res) => {
     if (!!exc) {
       const cmd = `UPDATE_SUB_ATTR:SDN=${sdn}:NUM=1:DAS=${das}:`;
       if (exc.pbxType === "jx10576") {
-        const result = await sendJx10Cmd(exc.ipAddr, cmd, false);
+        let result = { success: false, result: '' };
+        if(islocal === '0'){
+          result = await sendJx10Auth(exc.ipAddr, sdn, das,group,false);
+        }else{
+           result = await sendJx10Cmd(exc.ipAddr, cmd, false);
+        }
         res.status(200).send(result);
       } else if (exc.pbxType === "jx10680") {
         const result = await sendJx10Cmd(exc.ipAddr, cmd, true);
@@ -277,12 +361,14 @@ app.all("/notice/:phone/:ntype", async (req, res) => {
   }
 });
 
-app.all("/retrycdr/:year/:month", async (req, res) => {
-  const { year, month } = req.params;
+app.all("/retrycdr/:year/:month/:day/:days", async (req, res) => {
+  const { year, month, day, days } = req.params;
   if (year && month) {
     try {
       retryYear = year;
       retryMonth = month;
+      retryDay = day;
+      retryDays = days;
       res.status(200).send({ success: true });
     } catch (error) {
       logger.error("Something went wrong:", error.message);
@@ -317,11 +403,15 @@ app.all("/getcdrconf", async (req, res) => {
         code: 200,
         year: retryYear,
         month: retryMonth,
+        day: retryDay,
+        days: retryDays,
         interval: intervalNum,
       }
     );
     retryYear = 0;
     retryMonth = 0;
+    retryDay = 0;
+    retryDays = 0;
     intervalNum = 0;
     res.status(200).send(sendData);
   } catch (error) {

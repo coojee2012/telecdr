@@ -10,3 +10,16 @@
 6. 检查是否安装成功
 
 ### Linux
+
+### note
+FXS 1 ROUTE FXO 3
+FXO x ROUTE NONE
+IP  x ROUTE FXO 3
+
+zjs680000
+hx4 192.124.0.218
+
+205机器上部署fs时 
+需要在配置文件中设置IP地址
+external.conf
+vars.conf
